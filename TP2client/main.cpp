@@ -117,7 +117,7 @@ int inicia_cliente(){
     return 0;
 }
 
-int get_txt(int mustRead, uint8_t *buf){
+int get_txt(int mustRead, char *buf){
     int nBytes;
     if ((nBytes = recv(sock, buf, mustRead, MSG_WAITALL)) < mustRead){
         // got error or connection closed by server
@@ -141,8 +141,8 @@ int main(int argc, char * argv[])
     uint16_t idOrig;    //ID do remetente da mensagem.
     uint16_t idDest;    //ID do destinatario da mensagem.
     uint16_t seq;       //Numero de sequencia da mensagem.
-    uint8_t buf[BUFSZ]; //Buffer para fazer leitura do socket.
-    char txt[401];      //String para armazenar o texto digitado pelo usuario.
+    char buf[BUFSZ]; //Buffer para fazer leitura do socket.
+    char txt[500];      //String para armazenar o texto digitado pelo usuario.
     char option;        //Opção escolhida pelo usuario.
     uint16_t counter = 1;   //Contador para o numero de sequencia da mensagem.
     uint16_t tamanhoMsg;
@@ -194,12 +194,14 @@ int main(int argc, char * argv[])
         }
 
         if (FD_ISSET(STDIN, &readfds)){
-            scanf("%c", &option);
-            switch (option){
+            fgets (buf, 500, stdin);
+            switch (buf[0]){
                 case 'M' :      //O usuario quer enviar uma mensagem.
-                    scanf("%d", &idDest);
-                    fgets (txt, 401, stdin);
-                    if (send_msg(MSG, idDest, counter, txt, strlen(txt) + 1) != 0)
+                    if (sscanf(buf, "%c %d %[^\n]s", &option, &idDest, txt) < 3) {
+                        printf("Opção não reconhecida.\n Digite o ID do destinatário e a mensagem separados por um espaço.");
+                        break;
+                    }
+                    if (send_msg(MSG, idDest, counter, txt, strlen(txt)) != 0)
                         return 0;
                     counter++;
                     break;

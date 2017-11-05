@@ -10,3 +10,14 @@
 	<netinet/in.h>
 	<string.h>
 
+1509852137 source:/home/juliana/Desktop/tp2/TP2client/main.cpp
+	<iostream>
+	<stdio.h>
+	<stdlib.h>
+	<arpa/inet.h>
+	<sys/time.h>
+	<sys/types.h>
+	<unistd.h>
+	<netinet/in.h>
+	<string.h>
+
