@@ -1,0 +1,12 @@
+# depslib dependency file v1.0
+1509841981 source:/home/juliana/Desktop/TP2server/main.cpp
+	<iostream>
+	<sys/time.h>
+	<sys/types.h>
+	<unistd.h>
+	<netinet/in.h>
+	<string.h>
+	<queue>
+	<stdio.h>
+	<stdlib.h>
+
