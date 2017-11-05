@@ -250,7 +250,8 @@ int main(int argc, char * argv[])
                     } else {
                         if (send_msg(OK, idOrig, seq, "", 0) != 0)
                             return 0;
-                        printf("Mensagem de %d: %s\n", idOrig, (char *) buf);
+                        buf[tamanhoMsg + 1] = '\0';
+                        printf("Mensagem de %d: %s\n", idOrig, buf);
                     }
                     break;
                 case CLIST:

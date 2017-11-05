@@ -228,7 +228,7 @@ int main(int argc, char *argv[])
             if ((newsockfd = accept(listener, (struct sockaddr * ) & cli_addr, & clilen)) < 0){
                 perror("accept");
             } else {
-                //setsockopt(newsockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(struct timeval));  //Seta o tempo de timeout.
+                setsockopt(newsockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(struct timeval));  //Seta o tempo de timeout.
                 temp.id = 0;
                 temp.sock = newsockfd;
                 connections.push_back(temp);
@@ -336,15 +336,17 @@ int main(int argc, char *argv[])
                                 break;
                             }
                             for (vector<SocksIds>::iterator jt = connections.begin() ; jt != connections.end(); ++jt) {
-                                sock = jt->sock;
-                                if (send_msg(MSG, 0, idOrig, seq, (char *) buf, tamanhoMsg) != 0) {
-                                    if (jt->id != 0) {  //Checa se o cliente ja recebeu um ID.
-                                        onlineClients[jt->id] = 0;
-                                        availableIds.push(jt->id);
+                                if (jt->id != idOrig) {
+                                    sock = jt->sock;
+                                    if (send_msg(MSG, 0, idOrig, seq, (char *) buf, tamanhoMsg) != 0) {
+                                        if (jt->id != 0) {  //Checa se o cliente ja recebeu um ID.
+                                            onlineClients[jt->id] = 0;
+                                            availableIds.push(jt->id);
+                                        }
+                                        FD_CLR(sock, &master);
+                                        connections.erase(jt);
+                                        --jt;
                                     }
-                                    FD_CLR(sock, &master);
-                                    connections.erase(jt);
-                                    --jt;
                                 }
                             }
                             break;
