@@ -20,6 +20,10 @@ using namespace std;
 #define MSG 5
 #define CREQ 6
 #define CLIST 7
+#define OIAP 13
+#define MSGAP 15
+#define CREQAP 16
+#define CLISTAP 17
 #define SERV 65535
 
 uint16_t selfId;        //Identificador do cliente.
@@ -46,7 +50,7 @@ int get_header(uint16_t *type, uint16_t *idOrig, uint16_t *idDest, uint16_t *seq
     return 0;
 }
 
-int send_msg(uint16_t type, uint16_t idDest, uint16_t seq, char *txt, int length){
+int send_msg(uint16_t type, uint16_t idDest, uint16_t seq, char *txt, uint16_t length){
     uint8_t msg[BUFSZ];
     int nBytes;
     ((uint16_t*)msg)[0] = htons(type);
@@ -64,7 +68,7 @@ int send_msg(uint16_t type, uint16_t idDest, uint16_t seq, char *txt, int length
         return 1;
     }
 
-    if (type == MSG) {
+    if (type == MSG || type == MSGAP || type == OIAP) {
         ((uint16_t*)msg)[0] = htons(length);
         if ((nBytes = send(sock, msg, 2, MSG_NOSIGNAL)) < 2){
             if (nBytes < 0) {
@@ -143,6 +147,7 @@ int main(int argc, char * argv[])
     uint16_t seq;       //Numero de sequencia da mensagem.
     char buf[BUFSZ]; //Buffer para fazer leitura do socket.
     char txt[500];      //String para armazenar o texto digitado pelo usuario.
+    char apelido[30];      //String para armazenar o texto digitado pelo usuario.
     char option;        //Opção escolhida pelo usuario.
     uint16_t counter = 1;   //Contador para o numero de sequencia da mensagem.
     uint16_t tamanhoMsg;
@@ -196,17 +201,33 @@ int main(int argc, char * argv[])
         if (FD_ISSET(STDIN, &readfds)){
             fgets (buf, 500, stdin);
             switch (buf[0]){
-                case 'M' :      //O usuario quer enviar uma mensagem.
+                case 'M' :      //O usuario quer enviar uma mensagem com ID.
                     if (sscanf(buf, "%c %d %[^\n]s", &option, &idDest, txt) < 3) {
-                        printf("Opção não reconhecida.\n Digite o ID do destinatário e a mensagem separados por um espaço.");
+                        printf("Opção não reconhecida.\n Digite o ID do destinatário e a mensagem separados por um espaço.\n");
                         break;
                     }
                     if (send_msg(MSG, idDest, counter, txt, strlen(txt)) != 0)
                         return 0;
                     counter++;
                     break;
-                case 'L' :      //O usuario quer ver uma lista dos clientes conectados.
+                case 'K' :      //O usuario quer enviar uma mensagem com apelido.
+                    if (sscanf(buf, "%c %s %[^\n]s", &option, apelido, txt) < 3) {
+                        printf("Opção não reconhecida.\n Digite o apelido do destinatário e a mensagem separados por um espaço.");
+                        break;
+                    }
+                    sscanf(buf, "%c %[^\n]s", &option, txt);
+                    tamanhoMsg = strlen(txt);
+                    if (send_msg(MSGAP, SERV, counter, txt, tamanhoMsg) != 0)
+                        return 0;
+                    counter++;
+                    break;
+                case 'L' :      //O usuario quer ver uma lista dos IDS conectados.
                     if(send_msg(CREQ, SERV, counter, "", 0) != 0)
+                        return 0;
+                    counter++;
+                    break;
+                case 'N' :      //O usuario quer ver uma lista dos apelidos conectados.
+                    if(send_msg(CREQAP, SERV, counter, "", 0) != 0)
                         return 0;
                     counter++;
                     break;
@@ -214,6 +235,16 @@ int main(int argc, char * argv[])
                     if (send_msg(FLW, SERV, counter, "", 0) != 0)
                         return 0;
                     seqFLW = counter;
+                    counter++;
+                    break;
+                case 'A' :      //O usuario quer fornecer um apelido.
+                    if (sscanf(buf, "%c %s", &option, txt) < 2) {
+                        printf("Opção não reconhecida.\n O apelido não pode ter espaços.\n");
+                        break;
+                    }
+                    tamanhoMsg = strlen(txt);
+                    if (send_msg(OIAP, SERV, counter, txt, tamanhoMsg) != 0)
+                        return 0;
                     counter++;
                     break;
                 default :
@@ -250,7 +281,7 @@ int main(int argc, char * argv[])
                     } else {
                         if (send_msg(OK, idOrig, seq, "", 0) != 0)
                             return 0;
-                        buf[tamanhoMsg + 1] = '\0';
+                        buf[tamanhoMsg] = '\0';
                         printf("Mensagem de %d: %s\n", idOrig, buf);
                     }
                     break;
@@ -269,6 +300,25 @@ int main(int argc, char * argv[])
                     for (int i = 0; i < nClients; i++)
                         printf("%d\n", ntohs(*(uint16_t*) (buf + 2 * i)));
 
+                    break;
+                case CLISTAP:
+                    if (get_txt(2, buf) != 0)
+                        return 0;
+
+                    nClients = ntohs(*(uint16_t*) buf);
+                    printf("Clientes disponíveis:\n");
+                    for (int i = 0; i < nClients; i++) {
+                        if (get_txt(2, buf) != 0)
+                            return 0;
+                        tamanhoMsg = *((uint16_t*) buf);
+                        tamanhoMsg = ntohs(tamanhoMsg);
+                        if (get_txt(tamanhoMsg, buf) != 0)
+                            return 0;
+                        buf[tamanhoMsg] = '\0';
+                        printf("%s\n", buf);
+                    }
+                    if (send_msg(OK, idOrig, seq, "", 0) != 0)
+                        return 0;
                     break;
                 default :
                     if (send_msg(ERRO, idOrig, seq, "", 0) != 0)
