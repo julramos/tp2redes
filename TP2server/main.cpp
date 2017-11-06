@@ -11,7 +11,7 @@
 
 using namespace std;
 
-#define BUFSZ 410
+#define BUFSZ 410   //Tamanho do header + tamanho maximo da mensagem.
 #define OK 1
 #define ERRO 2
 #define OI 3
@@ -26,24 +26,25 @@ using namespace std;
 #define SERV 65535
 
 
-struct SocksIds {       //Permite recuperar o id de um socket.
+struct SocksIds {       //Permite recuperar o id de um socket e o apelido.
     int sock;
     string apelido;
     uint16_t id;
 };
-fd_set master;    // master file descriptor list
-vector<SocksIds> connections;
-vector<SocksIds>::iterator it;
-map<string, uint16_t> apelidosEIds;
-int onlineClients[65535]; //0 se o id nao pertence a um cliente conectado, caso contrario o numero do seu socket. Permite recuperar o socket de um id.
-queue<uint16_t> availableIds; //Fila para armazenar os ids disponvieis.
+
+fd_set master;                  //Master file descriptor list.
+vector<SocksIds> connections;   //Vector de conexões. 
+vector<SocksIds>::iterator it;  //Iterador que aponta para a struct do socket que está recebendo/enviando mensagens no momento.
+map<string, uint16_t> apelidosEIds;     //Map para consultar em O(log n) se um apelido está disponível.
+int onlineClients[65535];               //0 se o id nao pertence a um cliente conectado, caso contrario o numero do seu socket. Permite recuperar o socket de um id.
+queue<uint16_t> availableIds;           //Fila para armazenar os ids disponvieis.
 
 void trataErro() {
-    if (it->id != 0) {  //Checa se o cliente ja recebeu um ID.
+    if (it->id != 0) {  //Checa se o cliente ja recebeu um ID. Para devolvê-lo à fila em caso positivo.
         onlineClients[it->id] = 0;
         availableIds.push(it->id);
     }
-    if (it->apelido != "") {    //Checa se ele tem um apelido.
+    if (it->apelido != "") {    //Checa se ele tem um apelido para também torná-lo disponível em caso positivo.
         apelidosEIds.erase(apelidosEIds.find(it->apelido));
     }
     close(it->sock);
@@ -52,6 +53,9 @@ void trataErro() {
     --it;
 }
 
+//A funçao trataErro sempre desconecta o socket apontado pelo iterador global it.
+//Há casos (quando a mensagem é do tipo MSG ou MSGAP) onde o erro de comunicação não ocorre no socket apontado por it
+//e portanto essa função não pode ser chamada. O parâmetro flag, quando 0, evita essa chamada.
 int send_msg(uint16_t type, uint16_t idDest, uint16_t idOrig, uint16_t seq, char *txt, int length, int flag){
     uint8_t msg[BUFSZ];
     int nBytes;
@@ -60,6 +64,7 @@ int send_msg(uint16_t type, uint16_t idDest, uint16_t idOrig, uint16_t seq, char
     ((uint16_t*)msg)[2] = htons(idDest);
     ((uint16_t*)msg)[3] = htons(seq);
 
+    //Envia headers.
     if ((nBytes = send(it->sock, msg, 8, MSG_NOSIGNAL)) < 8){
         if (nBytes < 0) {
             perror("send");
@@ -70,6 +75,7 @@ int send_msg(uint16_t type, uint16_t idDest, uint16_t idOrig, uint16_t seq, char
         return 1;
     }
 
+    //Envia tamanho do texto.
     if (type == MSG) {
         ((uint16_t*)msg)[0] = htons(length);
         if ((nBytes = send(it->sock, msg, 2, MSG_NOSIGNAL)) < 2){
@@ -82,6 +88,7 @@ int send_msg(uint16_t type, uint16_t idDest, uint16_t idOrig, uint16_t seq, char
             return 1;
         }
 
+        //Envia texto.
         if ((nBytes = send(it->sock, txt, length, MSG_NOSIGNAL)) < length){
             if (nBytes < 0) {
                 perror("send");
@@ -101,6 +108,7 @@ int enviaLista(uint16_t idDest, uint16_t seq) {
     uint16_t total = 0;
     int nBytes;
 
+    //Calcula quantos IDs serão enviados.
     for (int i = 1; i < SERV; i++) {
         if (onlineClients[i] != 0) {
             listOfIDs[total] = htons(i);
@@ -123,6 +131,7 @@ int enviaLista(uint16_t idDest, uint16_t seq) {
         return 1;
     }
 
+    //Envia todos os IDs de uma vez.
     if ((nBytes = send(it->sock, (uint8_t *) listOfIDs, total * 2, MSG_NOSIGNAL)) < total * 2){
         if (nBytes < 0) {
             perror("send");
@@ -145,8 +154,9 @@ int enviaListaAp(uint16_t idDest, uint16_t seq) {
     ((uint16_t*)msg)[1] = htons(SERV);
     ((uint16_t*)msg)[2] = htons(idDest);
     ((uint16_t*)msg)[3] = htons(seq);
-    ((uint16_t*)msg)[4] = htons(connections.size());
+    ((uint16_t*)msg)[4] = htons(connections.size());    //Quantidade de clientes online.
 
+    //Envia headers.
     if ((nBytes = send(it->sock, msg, 10, MSG_NOSIGNAL)) < 10){
         if (nBytes < 0) {
             perror("send");
@@ -237,6 +247,8 @@ int get_txt(int mustRead, char *buf){
     return 0;
 }
 
+//Quando ocorre um erro no select, o servidor deve finalizar,
+//antes ele fecha todas as conexões.
 void close_all(vector<SocksIds> connections){
     for (vector<SocksIds>::iterator i = connections.begin() ; i != connections.end(); ++i) {
         close(i->sock);
@@ -245,21 +257,21 @@ void close_all(vector<SocksIds> connections){
 
 int main(int argc, char *argv[])
 {
-    SocksIds aux;
-    uint16_t type;  //Tipo da mensagem recebida.
+    SocksIds aux;       //Struct auxiliar para inserir novos clientes no vector de conexões.
+    uint16_t type;      //Tipo da mensagem recebida.
     uint16_t idOrig;    //ID do remetente da mensagem.
     uint16_t idDest;    //ID do destinatario da mensagem.
     uint16_t seq;       //Numero de sequencia da mensagem.
-    char buf[BUFSZ]; //Buffer para fazer leitura do socket.
-    uint16_t tamanhoMsg;
-    uint16_t newClient;         //Armazena temporariamente o id de um cliente que acabou de se conextar.
-    char apelido[30];
-    char txt[401];
-    map<string,uint16_t>::iterator pointer;
-    vector<SocksIds>::iterator temp;    //Para nao perder o it, quando for necessario enviar msg para outro cliente.
+    char buf[BUFSZ];    //Buffer para fazer leitura do socket.
+    uint16_t tamanhoMsg;        //Comprimento do texto recebido.
+    uint16_t newClient;         //Armazena temporariamente o id de um cliente que acabou de se conectar.
+    char apelido[30];           //String para armazenar apelido.
+    char txt[401];              //String para armazenar texto da mensagem.
+    map<string,uint16_t>::iterator pointer;     //Apontador para verificar se a busca pelo apelido retornou um iterador pro final do map.
+    vector<SocksIds>::iterator temp;    //Para nao perder o iterador it, quando for necessario enviar msg para outro cliente.
 
     memset(onlineClients, 0, 65535 * sizeof(int));
-
+    //Insere todos os IDs possíveis na fila.
     for (int i = 1; i < 65535; i++)
         availableIds.push(i);
 
@@ -297,6 +309,7 @@ int main(int argc, char *argv[])
     clilen = sizeof(cli_addr);
     ////////////
 
+    //Configurando select.
     fd_set read_fds;  // temp file descriptor list for select()
     int fdmax;        // maximum file descriptor number
 
@@ -324,9 +337,9 @@ int main(int argc, char *argv[])
                 perror("accept");
             } else {
                 setsockopt(newsockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(struct timeval));  //Seta o tempo de timeout.
-                aux.id = 0;
+                aux.id = 0;                 //O cliente ainda não tem ID pois ainda não enviou um OI.
                 aux.sock = newsockfd;
-                aux.apelido = "";
+                aux.apelido = "";           //Não tem apelido ainda pois não enviou OIAP.
                 connections.push_back(aux);
                 FD_SET(newsockfd, &master); // add to master set
                 if (newsockfd > fdmax) {    // keep track of the max
@@ -338,15 +351,20 @@ int main(int argc, char *argv[])
         // run through the existing connections looking for data to read
         for (it = connections.begin(); it != connections.end(); ++it) {
             if (FD_ISSET(it->sock, &read_fds)) {
+
+                //Pega header da mensagem.
                 if (get_header(&type, &idOrig, &idDest, &seq) != 0)
                     continue;
 
-                if (idOrig != it->id){    //Checa se id enviado coincide com o remetente.
+                //Checa se id enviado coincide com o remetente para evitar 
+                //de um cliente se passar por outro.
+                if (idOrig != it->id){    
                     send_msg(ERRO, it->id, SERV, seq, "", 0, 1);
                     continue;
                 }
 
                 switch (type){
+                    //Ignora mensagens de OK e ERRO.
                     case OK :
                         break;
                     case ERRO :
@@ -360,6 +378,7 @@ int main(int argc, char *argv[])
                             it->id = newClient;
                             onlineClients[newClient] = it->sock;
                         } else
+                            //Se ele já tem um ID, então nao recebe um novo.
                             send_msg(ERRO, it->id, SERV, seq, "", 0, 1);
                         break;
                     case OIAP :
@@ -375,7 +394,6 @@ int main(int argc, char *argv[])
                             //Recebe quantos caracteres tem no apelido.
                             if (get_txt(2, buf) != 0)
                                 break;
-
                             tamanhoMsg = ntohs(*(uint16_t*) buf);
 
                             //Pega apelido.
@@ -403,9 +421,9 @@ int main(int argc, char *argv[])
                         //Recebe quantos caracteres tem no texto.
                         if (get_txt(2, buf) != 0)
                             break;
-
                         tamanhoMsg = ntohs(*(uint16_t*) buf);
 
+                        //Recebe texto da mensagem.
                         if (get_txt(tamanhoMsg, buf) != 0)
                             break;
 
@@ -415,6 +433,7 @@ int main(int argc, char *argv[])
 
                             temp = it;
                             for (it = connections.begin(); it != connections.end(); ++it)
+                                //Não envia broadcast para remetente.
                                 if (it->id != idOrig)
                                     send_msg(MSG, 0, idOrig, seq, (char *) buf, tamanhoMsg, 1);
 
@@ -422,14 +441,17 @@ int main(int argc, char *argv[])
                             break;
                         }
 
+                        //Unicast
                         if (onlineClients[idDest] != 0){    //Checa se destino esta conectado.
                             if (send_msg(OK, idOrig, SERV, seq, "", 0, 1) != 0)
                                 break;
 
                             int s = it->sock;
                             it->sock = onlineClients[idDest];
+                            //A flag aqui é 0 pois se houver erro no envio da mensagem, quem deve ser desligado
+                            //não é o cliente apontado pelo apontador it, mas sim por temp.
                             if (send_msg(MSG, idDest, idOrig, seq, (char *) buf, tamanhoMsg, 0) != 0) {
-                                //Procura o socket na lista de conexões.
+                                //Procura o socket na lista de conexões para desconectá-lo.
                                 temp = it;
                                 for (it = connections.begin(); it != connections.end(); ++it)
                                     if (it->id == idDest) {
@@ -471,8 +493,11 @@ int main(int argc, char *argv[])
 
                             int s = it->sock;
                             it->sock = onlineClients[idDest];
+                            
+                            //A flag aqui é 0 pois se houver erro no envio da mensagem, quem deve ser desligado
+                            //não é o cliente apontado pelo apontador it, mas sim por temp.                            
                             if (send_msg(MSG, idDest, idOrig, seq, txt, strlen(txt), 0) != 0) {
-                                //Procura o socket na lista de conexões.
+                                //Procura o socket na lista de conexões para desconecá-lo.
                                 temp = it;
                                 for (it = connections.begin(); it != connections.end(); ++it)
                                     if (it->id == idDest) {
@@ -493,6 +518,7 @@ int main(int argc, char *argv[])
                         enviaListaAp(idOrig, seq);
                         break;
                     default :
+                        //Mensagem de tipo inválido.
                         send_msg(ERRO, idOrig, SERV, seq, "", 0, 1);
                 }
             }
