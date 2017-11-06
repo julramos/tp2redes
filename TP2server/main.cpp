@@ -137,22 +137,15 @@ int enviaLista(uint16_t idDest, uint16_t seq) {
 
 int enviaListaAp(uint16_t idDest, uint16_t seq) {
     uint8_t msg[10];
-    uint16_t total = 0;
     int nBytes;
     uint16_t tamanho;
-
-    vector<SocksIds>::iterator temp;
-    for (temp = connections.begin(); temp != connections.end(); ++temp) {
-        if (temp->apelido != "") {
-            total++;
-        }
-    }
+    uint16_t id;
 
     ((uint16_t*)msg)[0] = htons(CLISTAP);
     ((uint16_t*)msg)[1] = htons(SERV);
     ((uint16_t*)msg)[2] = htons(idDest);
     ((uint16_t*)msg)[3] = htons(seq);
-    ((uint16_t*)msg)[4] = htons(total);
+    ((uint16_t*)msg)[4] = htons(connections.size());
 
     if ((nBytes = send(it->sock, msg, 10, MSG_NOSIGNAL)) < 10){
         if (nBytes < 0) {
@@ -163,11 +156,22 @@ int enviaListaAp(uint16_t idDest, uint16_t seq) {
         return 1;
     }
 
+    vector<SocksIds>::iterator temp;
     for (temp = connections.begin(); temp != connections.end(); ++temp) {
+        //ID.
+        id = htons(temp->id);
+        if ((nBytes = send(it->sock, &id, 2, MSG_NOSIGNAL)) < 2){
+            if (nBytes < 0) {
+                perror("send");
+            }
+            //Cliente não está respondendo corretamente.
+            trataErro();
+            return 1;
+        }
         if (temp->apelido != "") {
             tamanho = htons(temp->apelido.size());
             //Tamanho do apelido.
-            if ((nBytes = send(it->sock, (uint8_t *) &tamanho, 2, MSG_NOSIGNAL)) < 2){
+            if ((nBytes = send(it->sock, &tamanho, 2, MSG_NOSIGNAL)) < 2){
                 if (nBytes < 0) {
                     perror("send");
                 }
@@ -176,6 +180,17 @@ int enviaListaAp(uint16_t idDest, uint16_t seq) {
                 return 1;
             }
             if ((nBytes = send(it->sock, temp->apelido.c_str(), temp->apelido.size(), MSG_NOSIGNAL)) < temp->apelido.size()){
+                if (nBytes < 0) {
+                    perror("send");
+                }
+                //Cliente não está respondendo corretamente.
+                trataErro();
+                return 1;
+            }
+        } else {
+            tamanho = 0;
+            //Tamanho do apelido.
+            if ((nBytes = send(it->sock, &tamanho, 2, MSG_NOSIGNAL)) < 2){
                 if (nBytes < 0) {
                     perror("send");
                 }
@@ -429,21 +444,24 @@ int main(int argc, char *argv[])
                         send_msg(ERRO, idOrig, SERV, seq, "", 0, 1);
                         break;
                     case MSGAP :
-                        //Recebe quantos caracteres tem no texto.
+                        //Recebe quantos caracteres tem no apelido.
                         if (get_txt(2, buf) != 0)
                             break;
-
                         tamanhoMsg = ntohs(*(uint16_t*) buf);
+                        //Pega apelido.
+                        if (get_txt(tamanhoMsg, apelido) != 0)
+                            break;
+                        apelido[tamanhoMsg] = '\0';
 
+
+                        //Recebe quantos caracteres tem na mensagem.
+                        if (get_txt(2, buf) != 0)
+                            break;
+                        tamanhoMsg = ntohs(*(uint16_t*) buf);
                         //Pega mensagem.
-                        if (get_txt(tamanhoMsg, buf) != 0)
+                        if (get_txt(tamanhoMsg, txt) != 0)
                             break;
-
-                        buf[tamanhoMsg] = '\0';
-                        if (sscanf(buf, "%s %[^\n]s", apelido, txt) < 2) {
-                            send_msg(ERRO, idOrig, SERV, seq, "", 0, 1);
-                            break;
-                        }
+                        txt[tamanhoMsg] = '\0';
 
                         pointer = apelidosEIds.find(apelido);
                         if (pointer != apelidosEIds.end()){    //Checa se destino esta conectado.

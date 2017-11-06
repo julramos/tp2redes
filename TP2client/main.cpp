@@ -152,6 +152,7 @@ int main(int argc, char * argv[])
     uint16_t counter = 1;   //Contador para o numero de sequencia da mensagem.
     uint16_t tamanhoMsg;
     int portno = atoi(argv[2]);
+    int nBytes;
 
     int seqFLW;             //Armazena o numero de sequencia da mensagem de FLW
                             //para poder conferir quando o servidor responder um OK.
@@ -215,10 +216,29 @@ int main(int argc, char * argv[])
                         printf("Opção não reconhecida.\n Digite o apelido do destinatário e a mensagem separados por um espaço.");
                         break;
                     }
-                    sscanf(buf, "%c %[^\n]s", &option, txt);
-                    tamanhoMsg = strlen(txt);
-                    if (send_msg(MSGAP, SERV, counter, txt, tamanhoMsg) != 0)
+                    if (send_msg(MSGAP, SERV, counter, apelido, strlen(apelido)) != 0)
                         return 0;
+                    tamanhoMsg = htons(strlen(txt));
+                    if ((nBytes = send(sock, &tamanhoMsg, 2, MSG_NOSIGNAL)) < 2){
+                        if (nBytes < 0) {
+                            perror("send");
+                        } else {
+                            printf("Servidor não está respondendo corretamente.\n");
+                        }
+                        printf("Encerrando cliente.\n");
+                        close(sock);
+                        return 0;
+                    }
+                    if ((nBytes = send(sock, txt, strlen(txt), MSG_NOSIGNAL)) < strlen(txt)){
+                        if (nBytes < 0) {
+                            perror("send");
+                        } else {
+                            printf("Servidor não está respondendo corretamente.\n");
+                        }
+                        printf("Encerrando cliente.\n");
+                        close(sock);
+                        return 1;
+                    }
                     counter++;
                     break;
                 case 'L' :      //O usuario quer ver uma lista dos IDS conectados.
@@ -242,8 +262,7 @@ int main(int argc, char * argv[])
                         printf("Opção não reconhecida.\n O apelido não pode ter espaços.\n");
                         break;
                     }
-                    tamanhoMsg = strlen(txt);
-                    if (send_msg(OIAP, SERV, counter, txt, tamanhoMsg) != 0)
+                    if (send_msg(OIAP, SERV, counter, txt, strlen(txt)) != 0)
                         return 0;
                     counter++;
                     break;
@@ -308,14 +327,20 @@ int main(int argc, char * argv[])
                     nClients = ntohs(*(uint16_t*) buf);
                     printf("Clientes disponíveis:\n");
                     for (int i = 0; i < nClients; i++) {
+                        //ID do cliente.
                         if (get_txt(2, buf) != 0)
                             return 0;
-                        tamanhoMsg = *((uint16_t*) buf);
-                        tamanhoMsg = ntohs(tamanhoMsg);
-                        if (get_txt(tamanhoMsg, buf) != 0)
+                        printf("%d ", ntohs(*((uint16_t*) buf)));
+                        if (get_txt(2, buf) != 0)
                             return 0;
-                        buf[tamanhoMsg] = '\0';
-                        printf("%s\n", buf);
+                        tamanhoMsg = ntohs(*((uint16_t*) buf));
+                        if (tamanhoMsg > 0) {
+                            if (get_txt(tamanhoMsg, buf) != 0)
+                                return 0;
+                            buf[tamanhoMsg] = '\0';
+                            printf("%s", buf);
+                        }
+                        printf("\n");
                     }
                     if (send_msg(OK, idOrig, seq, "", 0) != 0)
                         return 0;
